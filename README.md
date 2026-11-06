@@ -204,6 +204,8 @@ $cf = terraform -chdir=terraform output -raw cloudfront_domain
 Start-Process "https://$cf"
 ```
 
+![kubectl get pods, services, and TargetGroupBinding](screenshots/09-kubectl-resources.png)
+
 ![Deploy workflow run](screenshots/09-deploy-run.png)
 ![Target group with healthy pod IPs (EC2 → Target groups)](screenshots/09-target-group-healthy.png)
 ![Listings page on the CloudFront domain](screenshots/09-listings-page-v1.png)
@@ -275,6 +277,10 @@ gh run watch
 | The Deploy app workflow failed on the first merge | Changing `app/**` triggered it at the same time as the Terraform apply, before the cluster existed | Ran the deploy manually after the apply; a production pipeline would trigger the app deploy only after a successful infrastructure apply |
 | The release v2 deploy failed on the TargetGroupBinding webhook with `x509: certificate signed by unknown authority` | Reinstalling the Load Balancer Controller chart rotated its webhook certificate while the running controller pods kept the old one | Restarted the controller, then pinned the chart version and set `keepTLSSecret=true` so upgrades reuse the certificate |
 
+![Deploy app workflow run history](screenshots/12-deploy-runs-incident.png)
+
+*Deploy history: the first run failed before the cluster existed, and the v2 release failed on the webhook certificate before the fix in PR #3.*
+
 ## Cleanup
 
 Remove the app before the controller, so the controller can deregister targets and clear the TargetGroupBinding's finalizer:
@@ -307,7 +313,7 @@ terraform -chdir=bootstrap apply destroy.tfplan
 - **Cache behavior should come from the origin.** NGINX sends a 60-second Cache-Control for HTML and a one-year immutable one for assets, and CloudFront's managed CachingOptimized policy honors both. The headers proved it: Miss, then Hit with an Age header on the asset. Each deploy invalidates only the HTML, so releases show up right away while static assets keep serving from cache.
 - **Security scanning is a triage exercise.** Checkov raised 16 findings. I fixed two in code, accepted 14 as documented tradeoffs tied to having no custom domain, avoiding WAF cost, and same-day teardown, and scoped every suppression inline to a single resource so new resources still get checked.
 - **Pipelines need ordering, not just steps.** My first merge started the app deploy at the same time as the infrastructure apply, so it failed before the cluster existed. Infrastructure and app pipelines need an explicit dependency between them.
-- **Lab 1's fixes carried forward.** Pinned zone IDs, immutable OIDC subject claims, and the approval settings all worked on the first try, which is the point of writing troubleshooting down.
+- **Lab 1's fixes carried forward.** Pinned Availability Zone IDs, immutable OIDC subject claims, and the approval settings all worked on the first try, which is the point of writing troubleshooting down.
 
 ---
 
