@@ -1,0 +1,29 @@
+replicaCount: 2
+
+image:
+  repository: ""   # set by the deploy workflow
+  tag: ""          # set by the deploy workflow (git commit SHA)
+  pullPolicy: IfNotPresent
+
+# Traffic reaches pods through the Terraform-managed ALB, so the Service stays internal
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+# Set by the deploy workflow from the Terraform-managed target group
+targetGroupArn: ""
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 50

@@ -1,0 +1,134 @@
+name: Terraform
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write        # OIDC token for AWS
+  contents: read
+  security-events: write # upload Checkov SARIF to code scanning
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  TF_VAR_admin_principal_arn: ${{ vars.ADMIN_PRINCIPAL_ARN }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  checkov:
+    name: Checkov security gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform
+          framework: terraform
+          output_format: cli,sarif
+          output_file_path: console,results.sarif
+          # CKV_TF_1 wants registry modules pinned to a commit hash;
+          # these modules are pinned to versions from the Terraform Registry instead
+          skip_check: CKV_TF_1
+
+      - name: Upload SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: results.sarif
+
+  plan:
+    name: Terraform plan
+    needs: checkov
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.plan.outputs.has_changes }}
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Terraform init
+        run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -input=false -no-color -detailed-exitcode -out=main.tfplan > plan.txt
+          ec=$?
+          set -e
+          cat plan.txt
+          if [ $ec -eq 1 ]; then exit 1; fi
+          if [ $ec -eq 2 ]; then echo "has_changes=true" >> "$GITHUB_OUTPUT"; else echo "has_changes=false" >> "$GITHUB_OUTPUT"; fi
+          {
+            echo "## Terraform plan"
+            echo '```'
+            tail -n 60 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload saved plan
+        if: github.event_name != 'pull_request' && steps.plan.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tfplan
+          path: terraform/main.tfplan
+          retention-days: 1
+
+  apply:
+    name: Terraform apply
+    needs: plan
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.plan.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    environment: dev     # requires my approval before apply
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: tfplan
+          path: terraform
+
+      - name: Terraform init
+        run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+
+      - name: Terraform apply (saved plan)
+        run: terraform apply -input=false main.tfplan
