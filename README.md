@@ -1,6 +1,6 @@
 # AWS EKS Behind CloudFront: CDN Caching and Origin Protection
 
-**Status:** 🚧 In progress
+**Status:** Complete
 
 ## Video Walkthrough
 
@@ -102,8 +102,6 @@ aws sts get-caller-identity
 $adminArn = aws sts get-caller-identity --query Arn --output text
 ```
 
-> 📸 Screenshot: caller identity (account ID blurred)
-
 ### 3. Bootstrap the state bucket and pipeline role
 
 My repos use GitHub immutable subject claims, so the role's trust policy needs this repo's numeric ID:
@@ -117,8 +115,8 @@ terraform apply main.tfplan
 cd ..
 ```
 
-> 📸 Screenshot: bootstrap apply output
-> 📸 Screenshot: IAM role trust relationship showing the repo ID condition
+![Bootstrap apply output](screenshots/03-bootstrap-apply.png)
+![IAM role trust relationship showing the repo ID condition](screenshots/03-trust-relationship.png)
 
 ### 4. Store pipeline settings as GitHub variables
 
@@ -134,7 +132,7 @@ gh variable list
 
 In GitHub: **Settings → Environments → New environment → `dev`**. I enabled **Required reviewers** and added myself, left **Prevent self-review** unchecked (I'm the only reviewer), and turned off **Allow administrators to bypass**.
 
-> 📸 Screenshot: dev environment protection rules
+![Dev environment protection rules](screenshots/05-dev-environment.png)
 
 ### 6. Open a pull request to run the security gate and plan
 
@@ -146,8 +144,6 @@ git commit -m "feat: EKS behind CloudFront with ALB origin protection"
 git push -u origin feature/cloudfront-cdn
 gh pr create --fill
 ```
-
-> 📸 Screenshot: Checkov gate and plan on the PR
 
 #### Checkov decisions
 
@@ -182,8 +178,7 @@ git pull
 
 I approved the `dev` deployment in the Actions tab. EKS takes about 15 minutes, and CloudFront takes a few more to deploy to its edge locations.
 
-> 📸 Screenshot: approval with review comment
-> 📸 Screenshot: successful apply
+![Approval with review comment](screenshots/07-approval-gate.png)
 
 ### 8. Connect kubectl
 
@@ -192,7 +187,7 @@ aws eks update-kubeconfig --region us-east-1 --name eks-gavinbarbee-cdn
 kubectl get nodes
 ```
 
-> 📸 Screenshot: two Ready nodes
+![Two Ready nodes](screenshots/08-kubectl-nodes.png)
 
 ### 9. Deploy the app
 
@@ -209,9 +204,9 @@ $cf = terraform -chdir=terraform output -raw cloudfront_domain
 Start-Process "https://$cf"
 ```
 
-> 📸 Screenshot: deploy workflow run
-> 📸 Screenshot: target group with healthy pod IPs (EC2 → Target groups)
-> 📸 Screenshot: listings page on the CloudFront domain
+![Deploy workflow run](screenshots/09-deploy-run.png)
+![Target group with healthy pod IPs (EC2 → Target groups)](screenshots/09-target-group-healthy.png)
+![Listings page on the CloudFront domain](screenshots/09-listings-page-v1.png)
 
 ### 10. Prove the cache is working
 
@@ -228,8 +223,7 @@ The second response shows `X-Cache: Hit from cloudfront`, an `Age` header, and `
 curl.exe -sI "https://$cf/"
 ```
 
-> 📸 Screenshot: Miss then Hit on the asset
-> 📸 Screenshot: HTML Cache-Control header
+![Miss then Hit on the asset](screenshots/10-cache-miss-hit.png)
 
 ### 11. Prove the origin is protected
 
@@ -240,8 +234,8 @@ curl.exe -sI --max-time 10 "http://$alb/"
 
 The request times out, because the ALB security group only allows CloudFront's IP ranges. Even a request from inside those ranges without the secret header would get a 403 from the listener's default action.
 
-> 📸 Screenshot: direct ALB request timing out
-> 📸 Screenshot: ALB security group inbound rule referencing the CloudFront prefix list
+![Direct ALB request timing out](screenshots/11-direct-alb-blocked.png)
+![ALB security group inbound rule referencing the CloudFront prefix list](screenshots/11-alb-sg-prefix-list.png)
 
 ### 12. Ship a new release and invalidate
 
@@ -259,8 +253,8 @@ git pull
 gh run watch
 ```
 
-> 📸 Screenshot: invalidation in CloudFront (Invalidations tab)
-> 📸 Screenshot: page showing Release v2
+![Invalidation in CloudFront (Invalidations tab)](screenshots/12-invalidations.png)
+![Page showing Release v2](screenshots/12-release-v2.png)
 
 ## Verification Checklist
 
@@ -277,7 +271,9 @@ gh run watch
 
 | Issue | Cause | Fix |
 |---|---|---|
-| | | |
+| `terraform validate` rejected the ALB security group name | AWS reserves the `sg-` prefix for security group IDs | Renamed the security group to `gavinbarbee-alb-sg` |
+| The Deploy app workflow failed on the first merge | Changing `app/**` triggered it at the same time as the Terraform apply, before the cluster existed | Ran the deploy manually after the apply; a production pipeline would trigger the app deploy only after a successful infrastructure apply |
+| The release v2 deploy failed on the TargetGroupBinding webhook with `x509: certificate signed by unknown authority` | Reinstalling the Load Balancer Controller chart rotated its webhook certificate while the running controller pods kept the old one | Restarted the controller, then pinned the chart version and set `keepTLSSecret=true` so upgrades reuse the certificate |
 
 ## Cleanup
 
@@ -306,8 +302,13 @@ terraform -chdir=bootstrap apply destroy.tfplan
 
 ## Key Takeaways
 
-_Written after the build._
+- **A healthy pod doesn't mean a healthy site.** During the v2 release, the pods were running, but the deploy failed because the Load Balancer Controller's webhook certificate had been rotated without the controller restarting. The site recovered on its own once the controller retried, but the pipeline was still broken, so I fixed the root cause before the next deploy could hit it: pin the chart version and keep the certificate across upgrades.
+- **Origin protection needs more than one layer.** The ALB's security group only accepts CloudFront's managed prefix list, and its listener only forwards requests carrying a secret header that CloudFront adds. A direct request to the ALB times out, and a request from inside CloudFront's ranges without the header would get a 403.
+- **Cache behavior should come from the origin.** NGINX sends a 60-second Cache-Control for HTML and a one-year immutable one for assets, and CloudFront's managed CachingOptimized policy honors both. The headers proved it: Miss, then Hit with an Age header on the asset. Each deploy invalidates only the HTML, so releases show up right away while static assets keep serving from cache.
+- **Security scanning is a triage exercise.** Checkov raised 16 findings. I fixed two in code, accepted 14 as documented tradeoffs tied to having no custom domain, avoiding WAF cost, and same-day teardown, and scoped every suppression inline to a single resource so new resources still get checked.
+- **Pipelines need ordering, not just steps.** My first merge started the app deploy at the same time as the infrastructure apply, so it failed before the cluster existed. Infrastructure and app pipelines need an explicit dependency between them.
+- **Lab 1's fixes carried forward.** Pinned zone IDs, immutable OIDC subject claims, and the approval settings all worked on the first try, which is the point of writing troubleshooting down.
 
 ---
 
-*Built by Gavin Barbee · Time to complete: to be updated after the build*
+*Built by Gavin Barbee · Time to complete: about 1 hour*
