@@ -1,0 +1,13 @@
+{{- if .Values.targetGroupArn }}
+# The AWS Load Balancer Controller keeps the ALB target group in sync with pod IPs
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  serviceRef:
+    name: {{ .Release.Name }}
+    port: {{ .Values.service.port }}
+  targetGroupARN: {{ .Values.targetGroupArn }}
+  targetType: ip
+{{- end }}

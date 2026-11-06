@@ -1,0 +1,6 @@
+apiVersion: v2
+name: listings
+description: Demo listings site on Amazon EKS behind CloudFront
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

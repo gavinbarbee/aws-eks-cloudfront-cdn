@@ -1,0 +1,91 @@
+name: Deploy app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "helm/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  CLUSTER_NAME: eks-gavinbarbee-cdn
+  ECR_REPOSITORY: gavinbarbee-listings-cdn
+  TARGET_GROUP_NAME: tg-gavinbarbee-listings
+  DISTRIBUTION_COMMENT: cdn-gavinbarbee-listings
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image (tagged with commit SHA)
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          # Tags are immutable, so skip the push if this commit was already built
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$TAG" > /dev/null 2>&1; then
+            echo "Image $TAG already exists, skipping build"
+          else
+            docker build -t "$REGISTRY/$ECR_REPOSITORY:$TAG" app
+            docker push "$REGISTRY/$ECR_REPOSITORY:$TAG"
+          fi
+
+      - uses: azure/setup-helm@v5
+
+      - name: Connect to EKS
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER_NAME"
+
+      - name: Install metrics-server (needed for autoscaling)
+        run: |
+          helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+          helm repo update
+          helm upgrade --install metrics-server metrics-server/metrics-server --namespace kube-system --wait
+
+      - name: Install AWS Load Balancer Controller
+        run: |
+          VPC_ID=$(aws eks describe-cluster --name "$CLUSTER_NAME" --query "cluster.resourcesVpcConfig.vpcId" --output text)
+          helm repo add eks https://aws.github.io/eks-charts
+          helm repo update
+          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+            --namespace kube-system \
+            --set clusterName="$CLUSTER_NAME" \
+            --set serviceAccount.name=aws-load-balancer-controller \
+            --set region="$AWS_REGION" \
+            --set vpcId="$VPC_ID" \
+            --wait
+
+      - name: Deploy with Helm
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          TG_ARN=$(aws elbv2 describe-target-groups --names "$TARGET_GROUP_NAME" --query "TargetGroups[0].TargetGroupArn" --output text)
+          helm upgrade --install listings helm/listings \
+            --set image.repository="$REGISTRY/$ECR_REPOSITORY" \
+            --set image.tag="$TAG" \
+            --set targetGroupArn="$TG_ARN" \
+            --wait --timeout 5m
+
+      - name: Invalidate CloudFront cache for the HTML
+        run: |
+          DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?Comment=='$DISTRIBUTION_COMMENT'].Id | [0]" --output text)
+          aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/" "/index.html"
+          echo "Site: https://$(aws cloudfront get-distribution --id "$DIST_ID" --query "Distribution.DomainName" --output text)"

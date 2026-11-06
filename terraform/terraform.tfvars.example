@@ -1,0 +1,2 @@
+# Copy to terraform.tfvars for local runs (never commit the real file)
+admin_principal_arn = "arn:aws:iam::123456789012:user/gavinbarbee-admin"
