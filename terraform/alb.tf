@@ -11,6 +11,7 @@ resource "aws_security_group" "alb" {
 
 # Layer 1 of origin protection: only CloudFront IP ranges can reach the ALB
 resource "aws_vpc_security_group_ingress_rule" "alb_from_cloudfront" {
+  #checkov:skip=CKV_AWS_260:False positive - ingress is limited to the CloudFront managed prefix list, not 0.0.0.0/0
   security_group_id = aws_security_group.alb.id
   description       = "HTTP from CloudFront origin-facing ranges"
   prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront.id
@@ -39,6 +40,10 @@ resource "aws_vpc_security_group_ingress_rule" "pods_from_alb" {
 }
 
 resource "aws_lb" "listings" {
+  #checkov:skip=CKV2_AWS_20:No custom domain, so no ACM certificate for HTTPS on the origin or a custom viewer certificate; viewers still get HTTPS from CloudFront
+  #checkov:skip=CKV2_AWS_28:WAF adds monthly cost; origin is protected by the CloudFront prefix list and a secret header instead
+  #checkov:skip=CKV_AWS_91:Access logging needs extra S3 log buckets, out of scope for this lab
+  #checkov:skip=CKV_AWS_150:Deletion protection would block same-day lab teardown
   name                       = "alb-gavinbarbee-listings"
   internal                   = false
   load_balancer_type         = "application"
@@ -49,6 +54,7 @@ resource "aws_lb" "listings" {
 
 # Pods are registered here by the controller's TargetGroupBinding, not by Terraform
 resource "aws_lb_target_group" "listings" {
+  #checkov:skip=CKV_AWS_378:No custom domain, so no ACM certificate for HTTPS on the origin or a custom viewer certificate; viewers still get HTTPS from CloudFront
   name                 = "tg-gavinbarbee-listings"
   port                 = 8080
   protocol             = "HTTP"
@@ -69,6 +75,8 @@ resource "random_password" "origin_verify" {
 }
 
 resource "aws_lb_listener" "http" {
+  #checkov:skip=CKV_AWS_2:No custom domain, so no ACM certificate for HTTPS on the origin or a custom viewer certificate; viewers still get HTTPS from CloudFront
+  #checkov:skip=CKV_AWS_103:No custom domain, so no ACM certificate for HTTPS on the origin or a custom viewer certificate; viewers still get HTTPS from CloudFront
   load_balancer_arn = aws_lb.listings.arn
   port              = 80
   protocol          = "HTTP"

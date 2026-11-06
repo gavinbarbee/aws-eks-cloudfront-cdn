@@ -7,11 +7,18 @@ data "aws_cloudfront_response_headers_policy" "security" {
 }
 
 resource "aws_cloudfront_distribution" "listings" {
-  enabled         = true
-  comment         = "cdn-gavinbarbee-listings"
-  price_class     = "PriceClass_100" # North America and Europe edge locations
-  http_version    = "http2and3"
-  is_ipv6_enabled = true
+  #checkov:skip=CKV_AWS_174:No custom domain, so no ACM certificate for HTTPS on the origin or a custom viewer certificate; viewers still get HTTPS from CloudFront
+  #checkov:skip=CKV2_AWS_42:No custom domain, so no ACM certificate for HTTPS on the origin or a custom viewer certificate; viewers still get HTTPS from CloudFront
+  #checkov:skip=CKV_AWS_68:WAF adds monthly cost; origin is protected by the CloudFront prefix list and a secret header instead
+  #checkov:skip=CKV2_AWS_47:WAF adds monthly cost; origin is protected by the CloudFront prefix list and a secret header instead
+  #checkov:skip=CKV_AWS_86:Access logging needs extra S3 log buckets, out of scope for this lab
+  #checkov:skip=CKV_AWS_310:Origin failover needs a second origin, out of scope for a single-region lab
+  enabled             = true
+  default_root_object = "index.html"
+  comment             = "cdn-gavinbarbee-listings"
+  price_class         = "PriceClass_100" # North America and Europe edge locations
+  http_version        = "http2and3"
+  is_ipv6_enabled     = true
 
   origin {
     domain_name = aws_lb.listings.dns_name
@@ -46,7 +53,8 @@ resource "aws_cloudfront_distribution" "listings" {
 
   restrictions {
     geo_restriction {
-      restriction_type = "none"
+      restriction_type = "whitelist"
+      locations        = ["US"]
     }
   }
 

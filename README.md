@@ -149,6 +149,29 @@ gh pr create --fill
 
 > 📸 Screenshot: Checkov gate and plan on the PR
 
+#### Checkov decisions
+
+The first run failed 16 checks. I fixed two in code and suppressed the rest with inline `#checkov:skip` comments in each resource, so every exception sits next to the code it covers.
+
+| Check | Decision | Reason |
+|---|---|---|
+| CKV_AWS_374 | Fixed | Geo restriction set to a US allowlist |
+| CKV_AWS_305 | Fixed | Default root object set to `index.html` |
+| CKV_AWS_260 | Skipped | False positive: ingress is limited to the CloudFront managed prefix list, not 0.0.0.0/0 |
+| CKV2_AWS_20 | Skipped | No custom domain, so no ACM certificate for HTTPS on the origin or a custom viewer certificate; viewers still get HTTPS from CloudFront |
+| CKV_AWS_2 | Skipped | No custom domain, so no ACM certificate for HTTPS on the origin or a custom viewer certificate; viewers still get HTTPS from CloudFront |
+| CKV_AWS_103 | Skipped | No custom domain, so no ACM certificate for HTTPS on the origin or a custom viewer certificate; viewers still get HTTPS from CloudFront |
+| CKV_AWS_378 | Skipped | No custom domain, so no ACM certificate for HTTPS on the origin or a custom viewer certificate; viewers still get HTTPS from CloudFront |
+| CKV_AWS_174 | Skipped | No custom domain, so no ACM certificate for HTTPS on the origin or a custom viewer certificate; viewers still get HTTPS from CloudFront |
+| CKV2_AWS_42 | Skipped | No custom domain, so no ACM certificate for HTTPS on the origin or a custom viewer certificate; viewers still get HTTPS from CloudFront |
+| CKV2_AWS_28 | Skipped | WAF adds monthly cost; origin is protected by the CloudFront prefix list and a secret header instead |
+| CKV_AWS_68 | Skipped | WAF adds monthly cost; origin is protected by the CloudFront prefix list and a secret header instead |
+| CKV2_AWS_47 | Skipped | WAF adds monthly cost; origin is protected by the CloudFront prefix list and a secret header instead |
+| CKV_AWS_91 | Skipped | Access logging needs extra S3 log buckets, out of scope for this lab |
+| CKV_AWS_86 | Skipped | Access logging needs extra S3 log buckets, out of scope for this lab |
+| CKV_AWS_150 | Skipped | Deletion protection would block same-day lab teardown |
+| CKV_AWS_310 | Skipped | Origin failover needs a second origin, out of scope for a single-region lab |
+
 ### 7. Merge and approve the apply
 
 ```powershell
