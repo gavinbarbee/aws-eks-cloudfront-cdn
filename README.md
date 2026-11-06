@@ -73,7 +73,7 @@ flowchart LR
 | EKS cluster | eks-gavinbarbee-cdn |
 | ECR repository | gavinbarbee-listings-cdn |
 | ALB | alb-gavinbarbee-listings |
-| ALB security group | sg-gavinbarbee-alb |
+| ALB security group | gavinbarbee-alb-sg |
 | Target group | tg-gavinbarbee-listings |
 | CloudFront distribution | cdn-gavinbarbee-listings (comment) |
 | Load Balancer Controller IAM role | aws-lbc-gavinbarbee |

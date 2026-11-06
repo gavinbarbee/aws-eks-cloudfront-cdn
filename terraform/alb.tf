@@ -4,7 +4,7 @@ data "aws_ec2_managed_prefix_list" "cloudfront" {
 }
 
 resource "aws_security_group" "alb" {
-  name        = "sg-gavinbarbee-alb"
+  name        = "gavinbarbee-alb-sg"
   description = "ALB accepts HTTP only from CloudFront"
   vpc_id      = module.vpc.vpc_id
 }
